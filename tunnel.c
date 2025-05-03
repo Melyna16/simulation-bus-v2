@@ -9,38 +9,38 @@
 #define NB_BUS_Y 4
 #define NB_TRAJETS 10
 
-sem_t mutex;            // protège les variables partagées
-sem_t sem_XY;           // file d’attente pour X -> Y
-sem_t sem_YX;           // file d’attente pour Y -> X
+sem_t mutex;            
+sem_t sem_XY;           
+sem_t sem_YX;           
 
-int sens = 0;           // 0 = libre, 1 = X->Y, 2 = Y->X
-int count_XY = 0;       // nb bus dans le tunnel direction X->Y
-int count_YX = 0;       // nb bus dans le tunnel direction Y->X
+int sens = 0;           
+int count_XY = 0;       
+int count_YX = 0;       
 int attente_XY = 0;
 int attente_YX = 0;
 
 void wait_random() {
-    usleep((rand() % 500 + 1000) * 1000); // 1 à 1.5 sec
+    usleep((rand() % 500 + 1000) * 1000); 
 }
 
 void entrer_tunnel(int direction) {
     sem_wait(&mutex);
 
-    if (direction == 1) { // X -> Y
+    if (direction == 1) {
         if (sens == 2 || (sens == 1 && attente_YX > 0)) {
             attente_XY++;
             sem_post(&mutex);
-            sem_wait(&sem_XY); // attente passive
+            sem_wait(&sem_XY); 
             sem_wait(&mutex);
             attente_XY--;
         }
         sens = 1;
         count_XY++;
-    } else { // Y -> X
+    } else { 
         if (sens == 1 || (sens == 2 && attente_XY > 0)) {
             attente_YX++;
             sem_post(&mutex);
-            sem_wait(&sem_YX); // attente passive
+            sem_wait(&sem_YX); 
             sem_wait(&mutex);
             attente_YX--;
         }
