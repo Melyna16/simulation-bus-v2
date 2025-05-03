@@ -9,40 +9,43 @@
 #define NB_BUS_Y 4
 #define NB_TRAJETS 10
 
-sem_t mutex;
-int sens = 0; // 0 : libre, 1 : X->Y, 2 : Y->X
-int count_XY = 0;
-int count_YX = 0;
+sem_t mutex;            // protège les variables partagées
+sem_t sem_XY;           // file d’attente pour X -> Y
+sem_t sem_YX;           // file d’attente pour Y -> X
+
+int sens = 0;           // 0 = libre, 1 = X->Y, 2 = Y->X
+int count_XY = 0;       // nb bus dans le tunnel direction X->Y
+int count_YX = 0;       // nb bus dans le tunnel direction Y->X
 int attente_XY = 0;
 int attente_YX = 0;
 
 void wait_random() {
-    usleep((rand() % 500 + 1000) * 1000); // entre 1 et 1.5 secondes
+    usleep((rand() % 500 + 1000) * 1000); // 1 à 1.5 sec
 }
 
 void entrer_tunnel(int direction) {
     sem_wait(&mutex);
 
     if (direction == 1) { // X -> Y
-        attente_XY++;
-        while (sens == 2) { // Si l'autre sens est en cours
+        if (sens == 2 || (sens == 1 && attente_YX > 0)) {
+            attente_XY++;
             sem_post(&mutex);
-            usleep(100000); // attend 0.1s
+            sem_wait(&sem_XY); // attente passive
             sem_wait(&mutex);
+            attente_XY--;
         }
-        attente_XY--;
-        count_XY++;
         sens = 1;
+        count_XY++;
     } else { // Y -> X
-        attente_YX++;
-        while (sens == 1) {
+        if (sens == 1 || (sens == 2 && attente_XY > 0)) {
+            attente_YX++;
             sem_post(&mutex);
-            usleep(100000);
+            sem_wait(&sem_YX); // attente passive
             sem_wait(&mutex);
+            attente_YX--;
         }
-        attente_YX--;
-        count_YX++;
         sens = 2;
+        count_YX++;
     }
 
     sem_post(&mutex);
@@ -50,12 +53,14 @@ void entrer_tunnel(int direction) {
 
 void sortir_tunnel(int direction) {
     sem_wait(&mutex);
+
     if (direction == 1) {
         count_XY--;
         if (count_XY == 0) {
-            // Le tunnel est vide, priorité au côté qui attend
             if (attente_YX > 0) {
                 sens = 2;
+                for (int i = 0; i < attente_YX; i++)
+                    sem_post(&sem_YX);
             } else {
                 sens = 0;
             }
@@ -65,11 +70,14 @@ void sortir_tunnel(int direction) {
         if (count_YX == 0) {
             if (attente_XY > 0) {
                 sens = 1;
+                for (int i = 0; i < attente_XY; i++)
+                    sem_post(&sem_XY);
             } else {
                 sens = 0;
             }
         }
     }
+
     sem_post(&mutex);
 }
 
@@ -85,7 +93,6 @@ void* bus_thread(void* arg) {
     free(arg);
 
     for (int i = 1; i <= NB_TRAJETS; i++) {
-        // Aller
         int direction = (ville == 0) ? 1 : 2;
         printf("Bus %d de %s : %s -> %s (Trajet %d)\n", id, ville == 0 ? "X" : "Y",
                ville == 0 ? "X" : "Y", ville == 0 ? "Y" : "X", i);
@@ -93,7 +100,6 @@ void* bus_thread(void* arg) {
         wait_random();
         sortir_tunnel(direction);
 
-        // Retour
         direction = (direction == 1) ? 2 : 1;
         printf("Bus %d de %s : %s -> %s (Trajet %d)\n", id, ville == 0 ? "X" : "Y",
                ville == 0 ? "Y" : "X", ville == 0 ? "X" : "Y", i);
@@ -108,31 +114,32 @@ void* bus_thread(void* arg) {
 int main() {
     srand(time(NULL));
     sem_init(&mutex, 0, 1);
+    sem_init(&sem_XY, 0, 0);
+    sem_init(&sem_YX, 0, 0);
 
     pthread_t threads[NB_BUS_X + NB_BUS_Y];
 
-    // Créer les bus de X
     for (int i = 0; i < NB_BUS_X; i++) {
         BusArgs* args = malloc(sizeof(BusArgs));
         args->id = i;
-        args->ville = 0; // ville X
+        args->ville = 0;
         pthread_create(&threads[i], NULL, bus_thread, args);
     }
 
-    // Créer les bus de Y
     for (int i = 0; i < NB_BUS_Y; i++) {
         BusArgs* args = malloc(sizeof(BusArgs));
         args->id = i;
-        args->ville = 1; // ville Y
+        args->ville = 1;
         pthread_create(&threads[NB_BUS_X + i], NULL, bus_thread, args);
     }
 
-    // Attendre tous les threads
     for (int i = 0; i < NB_BUS_X + NB_BUS_Y; i++) {
         pthread_join(threads[i], NULL);
     }
 
     sem_destroy(&mutex);
+    sem_destroy(&sem_XY);
+    sem_destroy(&sem_YX);
+
     return 0;
 }
-
